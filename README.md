@@ -82,8 +82,12 @@ open build/NotchFill.app
 `create-dev-cert.sh` adds a self-signed "NotchFill Dev" identity to your login keychain.
 Without it the app is signed ad-hoc, and macOS asks for permissions again after each build.
 
-Release: `scripts/release.sh 0.1.0` builds `build/release/NotchFill-0.1.0.zip` (ad-hoc signed,
-no local paths inside); add `--publish` to tag `v0.1.0` and create the GitHub release.
+Release: every push to `main` that changes the app (a merged pull request, for example)
+publishes a new release with the next patch version (`v0.1.1` → `v0.1.2`) through
+[`.github/workflows/release.yml`](.github/workflows/release.yml). For another version run
+**Actions › Release › Run workflow** and enter it (e.g. `0.2.0`). Locally,
+`scripts/release.sh 0.1.0` builds `build/release/NotchFill-0.1.0.zip` (ad-hoc signed, no local
+paths inside); add `--publish` to tag `v0.1.0` and create the GitHub release.
 
 ## Diagnostics
 

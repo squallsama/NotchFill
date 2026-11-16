@@ -1,0 +1,77 @@
+# Publishes a GitHub release with the macOS app every time main changes (for example
+# when a pull request is merged). The version is the last vX.Y.Z tag with the patch
+# number plus one; run the workflow by hand (Actions › Release › Run workflow) to pick
+# another version, e.g. 0.2.0. The build itself is scripts/release.sh: ad-hoc signed,
+# not notarized, no local paths inside.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    # Changes that do not touch the app do not need a new release.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "agents/**"
+      - "LICENSE"
+      - ".gitignore"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the v, e.g. 0.2.0 (empty: next patch version)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+# One release at a time, so two merges in a row do not pick the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags for the version, history for CFBundleVersion
+
+      - name: Pick the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if git tag --points-at HEAD | /usr/bin/grep -q '^v'; then
+            echo "This commit already has a release tag; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -n "$INPUT_VERSION" ]]; then
+            version="${INPUT_VERSION#v}"
+          else
+            last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+            last="${last:-v0.0.0}"
+            IFS=. read -r major minor patch <<< "${last#v}"
+            version="$major.$minor.$((patch + 1))"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Bad version: $version" >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "Tag v$version already exists." >&2
+            exit 1
+          fi
+          echo "Version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898338+github-actions[bot]@users.noreply.github.com"
+          ./scripts/release.sh "${{ steps.version.outputs.version }}" --publish

@@ -4,6 +4,8 @@
 #   scripts/release.sh 0.1.0            -> build/release/NotchFill-0.1.0.zip (+ .sha256)
 #   scripts/release.sh 0.1.0 --publish  -> also tag v0.1.0 and create the GitHub release (gh)
 #
+# Normally CI runs this: .github/workflows/release.yml publishes a release on every push to main.
+#
 # The app is signed ad-hoc (no Apple Developer ID, not notarized), so on other Macs
 # Gatekeeper blocks the first launch; README "Install" explains how to open it.
 set -euo pipefail
@@ -52,7 +54,9 @@ cat "$ZIP.sha256"
 if [[ "$PUBLISH" == "--publish" ]]; then
   git tag -a "$TAG" -m "NotchFill $VERSION"
   git push origin "$TAG"
+  # Our notes first, then GitHub's list of merged pull requests since the last release.
   gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
     --title "NotchFill $VERSION" \
+    --generate-notes \
     --notes-file <(sed "s/@VERSION@/$VERSION/g" scripts/release-notes.md)
 fi

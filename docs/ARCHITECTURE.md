@@ -3,6 +3,10 @@
 Menu bar app (`LSUIElement`), Swift, SwiftPM, macOS 14+. No Xcode project:
 `scripts/build-app.sh` builds the `.app` bundle and signs it.
 
+CI (GitHub Actions, `macos-latest`): `build.yml` builds and checks every push and pull request;
+`release.yml` runs `scripts/release.sh <next patch version> --publish` on every push to `main`
+that touches the app, so each merge produces a GitHub release with the ad-hoc signed zip.
+
 ## Modules (`Sources/NotchFill`)
 
 | File | Role |
