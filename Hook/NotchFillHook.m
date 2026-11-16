@@ -22,6 +22,7 @@
 
 static IMP sOrigFrame;
 static IMP sOrigFrameInRect;
+static IMP sOrigVisibleTileFrame;
 static IMP sOrigSafeArea;
 static const void *kSavedLevelKey = &kSavedLevelKey;
 
@@ -85,6 +86,12 @@ static NSRect NFFrameForFullScreenModeInRect(NSWindow *self, SEL _cmd, NSRect in
     return NFStretch(self, r);
 }
 
+// Mission Control recalculates this frame when restoring a full screen Space.
+static NSRect NFVisibleTileFrameForFullScreen(NSWindow *self, SEL _cmd) {
+    NSRect r = ((NSRect (*)(id, SEL))sOrigVisibleTileFrame)(self, _cmd);
+    return NFStretch(self, r);
+}
+
 static IMP NFReplace(Class cls, NSString *name, IMP replacement) {
     Method m = class_getInstanceMethod(cls, NSSelectorFromString(name));
     if (m == NULL) {
@@ -121,6 +128,7 @@ static void NotchFillHookInit(void) {
         Class cls = NSWindow.class;
         sOrigFrame = NFReplace(cls, @"_frameForFullScreenMode", (IMP)NFFrameForFullScreenMode);
         sOrigFrameInRect = NFReplace(cls, @"_frameForFullScreenModeInRect:", (IMP)NFFrameForFullScreenModeInRect);
+        sOrigVisibleTileFrame = NFReplace(cls, @"_visibleTileFrameForFullScreen", (IMP)NFVisibleTileFrameForFullScreen);
         if (@available(macOS 12.0, *)) {
             sOrigSafeArea = method_setImplementation(
                 class_getInstanceMethod(NSScreen.class, @selector(safeAreaInsets)), (IMP)NFSafeAreaInsets);
