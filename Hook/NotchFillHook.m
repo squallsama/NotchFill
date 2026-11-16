@@ -15,6 +15,11 @@
 //    it into Unity's saved screen settings before Unity reads them. An env variable, not
 //    an argument, because wrapper apps (Contents/MacOS/load → inner .app) drop arguments.
 //
+// 5. NotchFill's game profile for this app (defaults key "profiles", by bundle id, or
+//    "exe:<name>" without one): `unityResolution` as in 4, and `fullScreen`: the first
+//    window that can go full screen does so when it becomes key (not for Unity games,
+//    which get -screen-fullscreen from notchfill-run).
+//
 // Set NOTCHFILL_DISABLE=1 to load the library without changes.
 
 #import <AppKit/AppKit.h>
@@ -41,11 +46,25 @@ static NSEdgeInsets NFSafeAreaInsets(NSScreen *self, SEL _cmd) {
     return insets;
 }
 
-// WxH from NOTCHFILL_RESOLUTION, else from NotchFill's "Game Resolution" setting (used by
-// games patched with scripts/patch-game.py, which start without notchfill-run).
-static NSString *NFResolution(void) {
+// This app's NotchFill game profile, or nil.
+static NSDictionary *NFProfile(void) {
+    NSString *key = NSBundle.mainBundle.bundleIdentifier;
+    if (key == nil) key = [@"exe:" stringByAppendingString:@(getprogname())];
+    CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("profiles"), CFSTR("dev.notchfill.NotchFill"));
+    if (v == NULL) return nil;
+    NSDictionary *all = CFBridgingRelease(v);
+    if (![all isKindOfClass:NSDictionary.class]) return nil;
+    NSDictionary *p = all[key];
+    return [p isKindOfClass:NSDictionary.class] ? p : nil;
+}
+
+// WxH from NOTCHFILL_RESOLUTION, else the game profile, else NotchFill's "Game Resolution"
+// setting (used by games patched with scripts/patch-game.py, which start without notchfill-run).
+static NSString *NFResolution(NSDictionary *profile) {
     const char *env = getenv("NOTCHFILL_RESOLUTION");
     if (env != NULL && env[0] != 0) return @(env);
+    id fromProfile = profile[@"unityResolution"];
+    if ([fromProfile isKindOfClass:NSString.class]) return fromProfile;
     CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("gameResolution"), CFSTR("dev.notchfill.NotchFill"));
     if (v == NULL) return nil;
     NSString *s = [(__bridge id)v isKindOfClass:NSString.class] ? [(__bridge NSString *)v copy] : nil;
@@ -53,13 +72,18 @@ static NSString *NFResolution(void) {
     return s;
 }
 
-static void NFApplyUnityResolution(void) {
-    NSString *res = NFResolution();
+static BOOL NFIsUnity(void) {
+    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+    if (frameworks == nil) return NO;
+    NSString *player = [frameworks stringByAppendingPathComponent:@"UnityPlayer.dylib"];
+    return [NSFileManager.defaultManager fileExistsAtPath:player];
+}
+
+static void NFApplyUnityResolution(NSDictionary *profile) {
+    NSString *res = NFResolution(profile);
     int w = 0, h = 0;
     if (res == nil || sscanf(res.UTF8String, "%dx%d", &w, &h) != 2 || w <= 0 || h <= 0) return;
-    NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
-    NSString *player = [frameworks stringByAppendingPathComponent:@"UnityPlayer.dylib"];
-    if (frameworks == nil || ![NSFileManager.defaultManager fileExistsAtPath:player]) return;
+    if (!NFIsUnity()) return;
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     [d setInteger:w forKey:@"Screenmanager Resolution Width"];
     [d setInteger:h forKey:@"Screenmanager Resolution Height"];
@@ -112,6 +136,32 @@ static void NFRaiseAboveMenuBar(NSWindow *window) {
     if (!NSEqualRects(window.frame, full)) [window setFrame:full display:YES];
 }
 
+// Profile "fullScreen": the first window that can go full screen does so once it is key.
+static void NFStartInFullScreen(void) {
+    __block id observer = nil;
+    observer = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:NSOperationQueue.mainQueue
+                usingBlock:^(NSNotification *n) {
+        NSWindow *w = n.object;
+        if (observer == nil) return;
+        if (w.styleMask & NSWindowStyleMaskFullScreen) {
+            [NSNotificationCenter.defaultCenter removeObserver:observer];
+            observer = nil;
+            return;
+        }
+        BOOL primary = (w.collectionBehavior & NSWindowCollectionBehaviorFullScreenPrimary) != 0;
+        BOOL none = (w.collectionBehavior & NSWindowCollectionBehaviorFullScreenNone) != 0;
+        BOOL resizable = (w.styleMask & NSWindowStyleMaskResizable) && (w.styleMask & NSWindowStyleMaskTitled);
+        if (none || !(primary || resizable) || w.parentWindow != nil) return;
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
+        observer = nil;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (!(w.styleMask & NSWindowStyleMaskFullScreen)) [w toggleFullScreen:nil];
+            NSLog(@"NotchFillHook: full screen at start");
+        });
+    }];
+}
+
 static void NFRestoreLevel(NSWindow *window) {
     NSNumber *saved = objc_getAssociatedObject(window, kSavedLevelKey);
     if (saved == nil) return;
@@ -133,8 +183,10 @@ static void NotchFillHookInit(void) {
             sOrigSafeArea = method_setImplementation(
                 class_getInstanceMethod(NSScreen.class, @selector(safeAreaInsets)), (IMP)NFSafeAreaInsets);
         }
-        NFApplyUnityResolution();
+        NSDictionary *profile = NFProfile();
+        NFApplyUnityResolution(profile);
         if (sOrigFrame == NULL && sOrigFrameInRect == NULL) return;
+        if ([profile[@"fullScreen"] boolValue] && !NFIsUnity()) NFStartInFullScreen();
 
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
         [nc addObserverForName:NSWindowDidEnterFullScreenNotification object:nil queue:nil

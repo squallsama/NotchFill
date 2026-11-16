@@ -19,6 +19,7 @@ that touches the app, so each merge produces a GitHub release with the ad-hoc si
 | `HotKey.swift` | Carbon global hot keys (no permission). |
 | `Toast.swift` | Short on-screen messages. |
 | `DisplayModes.swift` | Built-in display modes through `CGDisplayCopyAllDisplayModes` (with low-resolution duplicates) and `CGConfigureDisplayWithDisplayMode` (`.forSession`). "With notch strip" = same aspect as the panel's largest mode. Saves the user's mode before the first change, puts it back on quit / next launch unless the user changed the mode meanwhile. Favorites (max 4) in UserDefaults; hot keys ⌃⌥⌘0…4 in `AppDelegate`. |
+| `GameProfiles.swift` | Per-app profiles in defaults `profiles` (plist dict: key = bundle id, or `exe:<executable name>`; fields `name`, `path`, `isUnity`, `displayMode`, `fullScreen`, `hideChrome`, `unityResolution`). `ProfileWatcher` applies display mode / menu bar+Dock hiding on `NSWorkspace.didLaunchApplication` and undoes them when the last profiled app quits. `FullScreenStarter`: AX `AXFullScreen = true` on the first settable window, 2 s after it appears (not for Unity). The hook and `notchfill-run` read the same dictionary through CFPreferences. |
 | `LoginItem.swift` | Open at Login through `SMAppService.mainApp` (no helper app). |
 | `GameLauncher.swift` | Launch a game through `notchfill-run`; Steam launch option text; hardened-runtime / platform check. |
 | `DisplaySnapshot.swift` | Diagnostics: ScreenCaptureKit screenshot of the display. |
@@ -27,8 +28,8 @@ that touches the app, so each merge produces a GitHub release with the ad-hoc si
 
 | File | Role |
 |------|------|
-| `NotchFillHook.m` | Universal (arm64 + x86_64) dylib. Swizzles `-[NSWindow _frameForFullScreenMode]` / `_frameForFullScreenModeInRect:` to reach the screen top; on full screen enter puts the window at `kCGMainMenuWindowLevel + 1`, restores the level on exit. Reports `-[NSScreen safeAreaInsets].top = 0` (engines with their own full screen, e.g. Unity). With `NOTCHFILL_RESOLUTION` and `UnityPlayer.dylib` in the main bundle, writes Unity's `Screenmanager Resolution Width/Height`. `NOTCHFILL_DISABLE=1` turns it off. |
-| `notchfill-run.c` | `--resolution WxH`: if the bundle (also nested wrapper apps) has `UnityPlayer.dylib`, appends `-screen-width W -screen-height H`; sets `NOTCHFILL_RESOLUTION`. Sets `DYLD_INSERT_LIBRARIES` to the bundled hook and `execv`s the game (.app or executable). Needed because `/bin/sh` strips `DYLD_*`. |
+| `NotchFillHook.m` | Universal (arm64 + x86_64) dylib. Swizzles `-[NSWindow _frameForFullScreenMode]` / `_frameForFullScreenModeInRect:` to reach the screen top; on full screen enter puts the window at `kCGMainMenuWindowLevel + 1`, restores the level on exit. Reports `-[NSScreen safeAreaInsets].top = 0` (engines with their own full screen, e.g. Unity). With `NOTCHFILL_RESOLUTION` (else the profile's `unityResolution`, else the global setting) and `UnityPlayer.dylib` in the main bundle, writes Unity's `Screenmanager Resolution Width/Height`. Profile `fullScreen` (not Unity): the first full-screen-capable window calls `toggleFullScreen:` when it becomes key. `NOTCHFILL_DISABLE=1` turns it off. |
+| `notchfill-run.c` | `--resolution WxH`: if the bundle (also nested wrapper apps) has `UnityPlayer.dylib`, appends `-screen-width W -screen-height H`; sets `NOTCHFILL_RESOLUTION`. The app's profile wins: its `unityResolution` replaces `--resolution`, and `fullScreen` adds `-screen-fullscreen 1` for Unity. Sets `DYLD_INSERT_LIBRARIES` to the bundled hook and `execv`s the game (.app or executable). Needed because `/bin/sh` strips `DYLD_*`. |
 | `scripts/patch-game.py` | For hardened games: backup → add `LC_LOAD_WEAK_DYLIB` to the hook in `~/Library/Application Support/NotchFill/` → ad-hoc re-sign with own entitlements; `restore` puts the originals back. |
 
 Bundle layout: `Contents/MacOS/{NotchFill,notchfill-run}`, `Contents/Resources/libNotchFillHook.dylib`. Hook and launcher are signed without hardened runtime.
@@ -36,6 +37,7 @@ Bundle layout: `Contents/MacOS/{NotchFill,notchfill-run}`, `Contents/Resources/l
 ## Permissions
 
 - Screen Recording: mirror only.
+- Accessibility: Full Screen at Start for apps started without the hook only.
 - Stable code signature (`scripts/create-dev-cert.sh`) so TCC grants survive rebuilds.
 
 ## Technical constraints (measured, see RESEARCH.md)

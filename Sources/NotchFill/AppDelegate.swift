@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var hotKeys: [HotKey] = []
     private var lastMessage: String?
+    private var profileWatcher: ProfileWatcher?
 
     // MARK: Lifecycle
 
@@ -52,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                object: nil, queue: .main) { [weak self] _ in
             self?.mirror.screensChanged()
         }
+
+        profileWatcher = ProfileWatcher(chrome: chrome) { [weak self] in self?.note($0) }
 
         if NotchGeometry.notchedScreen() == nil {
             note("No screen with a notch was found. NotchFill has nothing to do on this Mac.")
@@ -168,6 +171,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         note(DisplayModes.switchTo(favs[slot - 1]))
     }
 
+    // MARK: Game profiles
+
+    /// representedObject of profile menu items: [profile key, value].
+    private func profileArgs(_ sender: NSMenuItem) -> (key: String, value: Any?)? {
+        guard let a = sender.representedObject as? [Any], let key = a.first as? String else { return nil }
+        return (key, a.count > 1 ? a[1] : nil)
+    }
+
+    @objc func addRunningAppProfile(_ sender: NSMenuItem) {
+        guard let pid = sender.representedObject as? pid_t, let app = NSRunningApplication(processIdentifier: pid),
+              let p = GameProfiles.newProfile(for: app) else { return }
+        GameProfiles.save(p)
+        note("Profile for \(p.name) added. Set it up in Game Profiles › \(p.name).")
+    }
+
+    @objc func addAppProfile() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a game or app"
+        panel.prompt = "Add Profile"
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url, let p = GameProfiles.newProfile(appAt: url) else { return }
+        if GameProfiles.get(p.key) == nil { GameProfiles.save(p) }
+        note("Profile for \(p.name) added. Set it up in Game Profiles › \(p.name).")
+    }
+
+    @objc func setProfileDisplayMode(_ sender: NSMenuItem) {
+        guard let (key, value) = profileArgs(sender) else { return }
+        GameProfiles.update(key) { $0.displayMode = value as? String }
+    }
+
+    @objc func toggleProfileFullScreen(_ sender: NSMenuItem) {
+        guard let (key, _) = profileArgs(sender) else { return }
+        GameProfiles.update(key) { $0.fullScreen.toggle() }
+        if let p = GameProfiles.get(key), p.fullScreen {
+            note(p.isUnity ? "\(p.name) starts in full screen when started through NotchFill or the Steam option."
+                           : "\(p.name) starts in full screen. Apps started without NotchFill need Accessibility.")
+        }
+    }
+
+    @objc func toggleProfileChrome(_ sender: NSMenuItem) {
+        guard let (key, _) = profileArgs(sender) else { return }
+        GameProfiles.update(key) { $0.hideChrome.toggle() }
+    }
+
+    @objc func setProfileUnityResolution(_ sender: NSMenuItem) {
+        guard let (key, value) = profileArgs(sender) else { return }
+        GameProfiles.update(key) { $0.unityResolution = value as? String }
+    }
+
+    @objc func removeProfile(_ sender: NSMenuItem) {
+        guard let (key, _) = profileArgs(sender), let p = GameProfiles.get(key) else { return }
+        GameProfiles.remove(key)
+        note("Profile for \(p.name) removed.")
+    }
+
+    @objc func openAccessibilitySettings() {
+        FullScreenStarter.askForPermission()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc func toggleLoginItem() {
         note(LoginItem.set(!LoginItem.isOn))
     }
@@ -238,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         if let displayItem = displayModeMenuItem() { menu.addItem(displayItem) }
+        menu.addItem(profilesMenuItem())
         menu.addItem(.separator())
 
         item(menu, "Launch Game with Notch Fill…", #selector(launchGame))
@@ -289,6 +357,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Display Mode submenu: sizes with the notch strip, refresh rates, favorites (⌃⌥⌘1…4),
     /// the user's own mode (⌃⌥⌘0), and the other sizes under More.
+    /// Game Profiles submenu: one submenu per profile, then ways to add one.
+    private func profilesMenuItem() -> NSMenuItem {
+        let top = NSMenuItem(title: "Game Profiles", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        top.submenu = sub
+        let profiles = GameProfiles.all
+
+        func choice(_ title: String, _ action: Selector, _ key: String, _ value: Any?, on: Bool, in menu: NSMenu) {
+            let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            i.target = self
+            i.representedObject = value.map { [key, $0] } ?? [key]
+            i.state = on ? .on : .off
+            menu.addItem(i)
+        }
+
+        for p in profiles {
+            let item = NSMenuItem(title: p.name, action: nil, keyEquivalent: "")
+            item.toolTip = p.summary
+            let m = NSMenu()
+            item.submenu = m
+            let info = NSMenuItem(title: p.summary, action: nil, keyEquivalent: "")
+            info.isEnabled = false
+            m.addItem(info)
+            m.addItem(.separator())
+
+            // Display mode: none, the current mode, favorites, and the saved one if it is elsewhere.
+            let dm = NSMenuItem(title: "Display Mode", action: nil, keyEquivalent: "")
+            let dmMenu = NSMenu()
+            dm.submenu = dmMenu
+            choice("Don't Change", #selector(setProfileDisplayMode(_:)), p.key, nil, on: p.displayMode == nil, in: dmMenu)
+            dmMenu.addItem(.separator())
+            var keys: [String] = []
+            if let cur = DisplayModes.current?.key { keys.append(cur) }
+            keys += DisplayModes.favorites
+            if let own = p.displayMode { keys.append(own) }
+            var seen = Set<String>()
+            for k in keys where seen.insert(k).inserted {
+                let label = DisplayModes.title(of: k) + (k == DisplayModes.current?.key ? " (current)" : "")
+                choice(label, #selector(setProfileDisplayMode(_:)), p.key, k, on: p.displayMode == k, in: dmMenu)
+            }
+            dmMenu.addItem(.separator())
+            let hint = NSMenuItem(title: "Other modes: switch to it first, or add it to favorites", action: nil, keyEquivalent: "")
+            hint.isEnabled = false
+            dmMenu.addItem(hint)
+            m.addItem(dm)
+
+            choice("Full Screen at Start", #selector(toggleProfileFullScreen(_:)), p.key, nil, on: p.fullScreen, in: m)
+            choice("Hide Menu Bar and Dock", #selector(toggleProfileChrome(_:)), p.key, nil, on: p.hideChrome, in: m)
+
+            if p.isUnity {
+                let ur = NSMenuItem(title: "Unity Resolution", action: nil, keyEquivalent: "")
+                let urMenu = NSMenu()
+                ur.submenu = urMenu
+                let global = GameLauncher.resolution.map { $0.replacingOccurrences(of: "x", with: "×") } ?? "game's own"
+                choice("Global Setting (\(global))", #selector(setProfileUnityResolution(_:)), p.key, nil,
+                       on: p.unityResolution == nil, in: urMenu)
+                urMenu.addItem(.separator())
+                for preset in GameLauncher.resolutionPresets() {
+                    choice(preset.title, #selector(setProfileUnityResolution(_:)), p.key, preset.value,
+                           on: p.unityResolution == preset.value, in: urMenu)
+                }
+                m.addItem(ur)
+            }
+            m.addItem(.separator())
+            choice("Remove Profile", #selector(removeProfile(_:)), p.key, nil, on: false, in: m)
+            sub.addItem(item)
+        }
+        if !profiles.isEmpty { sub.addItem(.separator()) }
+
+        // Running apps without a profile.
+        let have = Set(profiles.map(\.key))
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.processIdentifier != getpid() }
+            .filter { GameProfiles.key(for: $0).map { !have.contains($0) } ?? false }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        let running = NSMenuItem(title: "Add Running App", action: nil, keyEquivalent: "")
+        let runningMenu = NSMenu()
+        running.submenu = runningMenu
+        for app in apps {
+            let i = NSMenuItem(title: app.localizedName ?? "?", action: #selector(addRunningAppProfile(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = app.processIdentifier
+            i.image = app.icon.map { icon in
+                let copy = icon.copy() as! NSImage
+                copy.size = NSSize(width: 16, height: 16)
+                return copy
+            }
+            runningMenu.addItem(i)
+        }
+        running.isEnabled = !apps.isEmpty
+        sub.addItem(running)
+        item(sub, "Add App…", #selector(addAppProfile))
+
+        if profiles.contains(where: { $0.fullScreen && !$0.isUnity }) && !FullScreenStarter.isTrusted {
+            sub.addItem(.separator())
+            item(sub, "Accessibility: Not allowed – Open Settings…", #selector(openAccessibilitySettings))
+                .toolTip = "Full Screen at Start for apps started without NotchFill (Steam, Finder, Dock)."
+        }
+        sub.addItem(.separator())
+        let hint = NSMenuItem(title: "A profile applies when its app starts", action: nil, keyEquivalent: "")
+        hint.isEnabled = false
+        sub.addItem(hint)
+        return top
+    }
+
     private func displayModeMenuItem() -> NSMenuItem? {
         let entries = DisplayModes.all()
         guard let cur = DisplayModes.current, !entries.isEmpty else { return nil }

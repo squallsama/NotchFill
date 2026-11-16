@@ -18,6 +18,8 @@ Mac gamers with a notched MacBook Pro / Air.
   Project rule: no SIP changes, so no Dock add-on.
 - Display mode switching (no SIP): sizes with the notch strip, refresh rate, favorites on hot keys;
   the user's own mode comes back on quit.
+- Game profiles (no SIP): per app display mode, full screen at start, menu bar/Dock hiding,
+  Unity resolution; applied when the app starts, undone when it quits.
 - Later: trackpad gestures for Dock / menu bar / Control Center.
 
 ## Rules

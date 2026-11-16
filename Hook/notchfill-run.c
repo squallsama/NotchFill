@@ -7,6 +7,10 @@
 // --resolution: for Unity games (UnityPlayer.dylib somewhere in the .app, also inside
 // wrapper apps) adds "-screen-width W -screen-height H". Other games ignore it.
 //
+// NotchFill's game profile for the app (defaults "profiles", by bundle id or
+// "exe:<name>") wins over --resolution: its `unityResolution` is used instead, and with
+// `fullScreen` Unity games also get "-screen-fullscreen 1".
+//
 // The hook library is found next to this binary: ../Resources/libNotchFillHook.dylib.
 // The environment is set here (not in the shell) because macOS removes DYLD_* variables
 // when a protected binary such as /bin/sh starts a process.
@@ -68,6 +72,55 @@ static int is_unity(const char *app) {
     return found;
 }
 
+// NotchFill's profile for `app` (outer .app, may be "") or the bare executable `exe`.
+// Returns a retained dictionary or NULL.
+static CFDictionaryRef copy_profile(const char *app, const char *exe) {
+    CFStringRef key = NULL;
+    if (app[0]) {
+        CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)app, strlen(app), true);
+        CFBundleRef bundle = url ? CFBundleCreate(NULL, url) : NULL;
+        if (url) CFRelease(url);
+        if (bundle) {
+            CFStringRef id = CFBundleGetIdentifier(bundle);
+            if (id) key = CFStringCreateCopy(NULL, id);
+            CFRelease(bundle);
+        }
+    }
+    if (!key) {
+        const char *slash = strrchr(exe, '/');
+        key = CFStringCreateWithFormat(NULL, NULL, CFSTR("exe:%s"), slash ? slash + 1 : exe);
+    }
+    CFDictionaryRef result = NULL;
+    CFPropertyListRef all = CFPreferencesCopyAppValue(CFSTR("profiles"), CFSTR("dev.notchfill.NotchFill"));
+    if (all && CFGetTypeID(all) == CFDictionaryGetTypeID()) {
+        CFTypeRef p = CFDictionaryGetValue((CFDictionaryRef)all, key);
+        if (p && CFGetTypeID(p) == CFDictionaryGetTypeID()) result = CFRetain(p);
+    }
+    if (all) CFRelease(all);
+    CFRelease(key);
+    return result;
+}
+
+static int profile_bool(CFDictionaryRef profile, CFStringRef name) {
+    CFTypeRef v = profile ? CFDictionaryGetValue(profile, name) : NULL;
+    if (v && CFGetTypeID(v) == CFBooleanGetTypeID()) return CFBooleanGetValue(v);
+    int n = 0;
+    return v && CFGetTypeID(v) == CFNumberGetTypeID() && CFNumberGetValue(v, kCFNumberIntType, &n) && n != 0;
+}
+
+// Profile's "unityResolution" ("WxH") into width/height; 0 if none.
+static int profile_resolution(CFDictionaryRef profile, int *width, int *height) {
+    CFTypeRef v = profile ? CFDictionaryGetValue(profile, CFSTR("unityResolution")) : NULL;
+    char buf[32];
+    if (!v || CFGetTypeID(v) != CFStringGetTypeID() ||
+        !CFStringGetCString(v, buf, sizeof(buf), kCFStringEncodingUTF8)) return 0;
+    int w = 0, h = 0;
+    if (sscanf(buf, "%dx%d", &w, &h) != 2 || w <= 0 || h <= 0) return 0;
+    *width = w;
+    *height = h;
+    return 1;
+}
+
 int main(int argc, char **argv) {
     int width = 0, height = 0;
     if (argc >= 3 && strcmp(argv[1], "--resolution") == 0) {
@@ -115,8 +168,14 @@ int main(int argc, char **argv) {
         path = target;
     }
 
-    // New argv: target, original args, then the Unity resolution args.
-    char **args = calloc((size_t)argc + 6, sizeof(char *));
+    CFDictionaryRef profile = copy_profile(app, path);
+    profile_resolution(profile, &width, &height);
+    int full_screen = profile_bool(profile, CFSTR("fullScreen"));
+    if (profile) CFRelease(profile);
+    int unity = (width > 0 || full_screen) && app[0] && is_unity(app);
+
+    // New argv: target, original args, then the Unity args.
+    char **args = calloc((size_t)argc + 8, sizeof(char *));
     int n = 0;
     args[n++] = (char *)path;
     for (int i = 2; i < argc; i++) args[n++] = argv[i];
@@ -125,7 +184,7 @@ int main(int argc, char **argv) {
         char res[32];
         snprintf(res, sizeof(res), "%dx%d", width, height);
         setenv("NOTCHFILL_RESOLUTION", res, 1);
-        if (app[0] && is_unity(app)) {
+        if (unity) {
             snprintf(w, sizeof(w), "%d", width);
             snprintf(h, sizeof(h), "%d", height);
             args[n++] = "-screen-width";
@@ -133,8 +192,12 @@ int main(int argc, char **argv) {
             args[n++] = "-screen-height";
             args[n++] = h;
         } else {
-            fprintf(stderr, "notchfill-run: not a Unity game, --resolution ignored\n");
+            fprintf(stderr, "notchfill-run: not a Unity game, resolution ignored\n");
         }
+    }
+    if (full_screen && unity) {
+        args[n++] = "-screen-fullscreen";
+        args[n++] = "1";
     }
     args[n] = NULL;
     execv(path, args);
