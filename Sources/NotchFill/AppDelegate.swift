@@ -30,7 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.defaults.set(false, forKey: Pref.mirror)
         }
         if defaults.bool(forKey: Pref.sdl) { SDLMode.set(true) }
-        if defaults.bool(forKey: Pref.mirror) { mirror.start() }
+        // Lid closed with an external display: keep the setting, start when the notch is back.
+        if defaults.bool(forKey: Pref.mirror) { mirror.start(waitForScreen: true) }
 
         let mods = cmdKey | optionKey | controlKey
         if let hk = HotKey(id: 1, keyCode: kVK_ANSI_M, modifiers: mods, handler: { [weak self] in self?.toggleMirror() }) {
@@ -64,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func toggleMirror() {
-        if mirror.isRunning {
+        if mirror.isOn {
             mirror.stop()
             defaults.set(false, forKey: Pref.mirror)
             note("Rear-view mirror is off.")
@@ -205,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sdl.state = defaults.bool(forKey: Pref.sdl) ? .on : .off
         sdl.toolTip = "Sets \(SDLMode.variable)=0 for apps started from now on. Restart Steam and the game."
         item(menu, "Rear-View Mirror", #selector(toggleMirror), key: "m", mods: [.control, .option, .command])
-            .state = mirror.isRunning ? .on : .off
+            .state = mirror.isOn ? .on : .off
         item(menu, "Hide Menu Bar and Dock", #selector(toggleChrome)).state = chrome.isHidden ? .on : .off
         menu.addItem(.separator())
 

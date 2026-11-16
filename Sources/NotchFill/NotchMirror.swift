@@ -8,9 +8,16 @@ import ScreenCaptureKit
 ///
 /// Uses ScreenCaptureKit on the notch rect only, so it needs Screen Recording permission.
 final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// Called when the mirror cannot run (no permission, capture failed). The mirror is
+    /// stopped by then.
     var onError: ((String) -> Void)?
 
     private(set) var isRunning = false
+    /// On, but no screen has a notch right now (lid closed with an external display).
+    /// Starts again when the notched screen comes back.
+    private(set) var isWaitingForScreen = false
+    /// Running or waiting: what the menu shows as on.
+    var isOn: Bool { isRunning || isWaitingForScreen }
     private var target: NotchScreen?
     private var panel: NSPanel?
     private let imageLayer = CALayer()
@@ -43,10 +50,17 @@ final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
 
     static var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
 
-    func start() {
+    /// - Parameter waitForScreen: with no notched screen now, wait for one instead of
+    ///   reporting an error (used at app launch and when screens change).
+    func start(waitForScreen: Bool = false) {
         guard !isRunning else { return }
+        isWaitingForScreen = false
         guard let t = NotchGeometry.notchedScreen() else {
-            onError?("Mirror: no screen with a notch.")
+            if waitForScreen {
+                isWaitingForScreen = true
+            } else {
+                onError?("Mirror: no screen with a notch.")
+            }
             return
         }
         if !Self.hasPermission {
@@ -64,6 +78,11 @@ final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() {
+        isWaitingForScreen = false
+        stopCapture()
+    }
+
+    private func stopCapture() {
         generation += 1
         isRunning = false
         timer?.invalidate()
@@ -75,10 +94,17 @@ final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
         s?.stopCapture { _ in }
     }
 
-    func screensChanged() {
-        guard isRunning else { return }
+    /// Stop, then tell the app. Without the stop the menu would still show the mirror as
+    /// on, and the panel would show the last frame (or nothing) at every hover.
+    private func fail(_ message: String) {
         stop()
-        start()
+        onError?(message)
+    }
+
+    func screensChanged() {
+        guard isOn else { return }
+        stopCapture()
+        start(waitForScreen: true)
     }
 
     // MARK: Pointer tracking
@@ -151,7 +177,7 @@ final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 guard gen == self.generation else { return }
                 guard let display = content.displays.first(where: { $0.displayID == t.displayID }) else {
-                    self.onError?("Mirror: cannot find the display to capture.")
+                    self.fail("Mirror: cannot find the display to capture.")
                     return
                 }
                 let me = content.applications.filter { $0.processID == getpid() }
@@ -177,7 +203,9 @@ final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
                 }
                 self.stream = s
             } catch {
-                self.onError?("Mirror: \(error.localizedDescription)")
+                // Ignore errors of a capture that was stopped in the meantime.
+                guard gen == self.generation else { return }
+                self.fail("Mirror: \(error.localizedDescription)")
             }
         }
     }
@@ -202,7 +230,7 @@ final class NotchMirror: NSObject, SCStreamOutput, SCStreamDelegate {
         DispatchQueue.main.async {
             guard stream === self.stream else { return }
             self.stream = nil
-            self.onError?("Mirror stopped: \(error.localizedDescription)")
+            self.fail("Mirror stopped: \(error.localizedDescription)")
         }
     }
 }
