@@ -1,0 +1,37 @@
+# Builds the app on every push and pull request, so a change that does not compile
+# shows up before it is merged. Signs ad-hoc, like scripts/release.sh.
+name: Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build NotchFill.app
+        run: CODESIGN_IDENTITY=- ./scripts/build-app.sh
+
+      - name: Check the bundle
+        run: |
+          codesign --verify --strict --deep build/NotchFill.app
+          # The hook and the launcher must stay universal, so Rosetta games work too.
+          for f in Resources/libNotchFillHook.dylib MacOS/notchfill-run; do
+            for arch in arm64 x86_64; do
+              lipo "build/NotchFill.app/Contents/$f" -verify_arch "$arch"
+            done
+          done
+
+      - name: Check scripts
+        run: |
+          python3 -m py_compile scripts/patch-game.py
+          for s in scripts/*.sh; do bash -n "$s"; done
+
+      - name: Build the full screen probe
+        run: swiftc -O tools/fullscreen-probe.swift -o build/fullscreen-probe
