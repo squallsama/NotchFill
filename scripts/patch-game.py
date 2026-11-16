@@ -7,7 +7,7 @@ does not work). This CHANGES THE GAME'S FILES, so it always makes a backup first
     scripts/patch-game.py status  "/Applications/Some Game.app"
 
 What `patch` does, for the app and every app inside it whose executable has the hardened
-runtime without `allow-dyld-environment-variables`:
+runtime without both `allow-dyld-environment-variables` and `disable-library-validation`:
   1. Back up the executable and _CodeSignature to
      ~/Library/Application Support/NotchFill/backups/<bundle id>/
   2. Copy the hook to ~/Library/Application Support/NotchFill/libNotchFillHook.dylib.
@@ -73,7 +73,11 @@ def is_hardened(exe):
     flags = next((l for l in info.splitlines() if "flags=" in l), "")
     if "runtime" not in flags:
         return False
-    return not entitlements(exe).get("com.apple.security.cs.allow-dyld-environment-variables", False)
+    # DYLD_INSERT_LIBRARIES needs both: dyld variables allowed, and library validation off
+    # (the hook is signed by another team).
+    ents = entitlements(exe)
+    return not (ents.get("com.apple.security.cs.allow-dyld-environment-variables", False)
+                and ents.get("com.apple.security.cs.disable-library-validation", False))
 
 
 def targets(app):

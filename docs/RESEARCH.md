@@ -57,8 +57,9 @@ The other variables (`_NS_SAFE_APERTURE_COMPATIBILITY_MODES=0/7`, `…=0`, `-NSA
 
 Product: `Hook/NotchFillHook.m` (universal dylib) does 15 + 16; it is loaded with
 `DYLD_INSERT_LIBRARIES` through `notchfill-run` (Steam launch option or the NotchFill menu).
-Limits: games with the hardened runtime (without `allow-dyld-environment-variables`) do
-not load it; Apple platform apps never do. While a game is in full screen its window is
+Limits: games with the hardened runtime load it only when they have both
+`allow-dyld-environment-variables` and `disable-library-validation`; Apple platform apps
+never do. While a game is in full screen its window is
 above the menu bar, so the menu bar does not reveal at the top edge.
 
 Real games:
@@ -112,7 +113,8 @@ treat it as cheating. ProMax avoids this on purpose.
 
 Most games sold outside the Mac App Store are ad-hoc signed or have no hardened runtime and
 take `DYLD_INSERT_LIBRARIES`; a game with the hardened runtime needs
-`com.apple.security.cs.allow-dyld-environment-variables` (check also apps nested inside a
+`com.apple.security.cs.allow-dyld-environment-variables` and, because the hook has another
+signer, `com.apple.security.cs.disable-library-validation` (check also apps nested inside a
 wrapper app).
 The variable must be per game (Steam launch option or a NotchFill launcher), never global
 through `launchctl setenv`.

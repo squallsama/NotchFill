@@ -2,7 +2,8 @@ import AppKit
 
 /// Starts games with NotchFillHook loaded (`Contents/MacOS/notchfill-run` in this bundle),
 /// so native full screen covers the notch strip. No SIP change is needed. Games with the
-/// hardened runtime (without `allow-dyld-environment-variables`) do not load the hook.
+/// hardened runtime load the hook only with both `allow-dyld-environment-variables` and
+/// `disable-library-validation`.
 enum GameLauncher {
     static var runnerPath: String {
         Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/notchfill-run").path
@@ -42,8 +43,9 @@ enum GameLauncher {
         case notAnApp
     }
 
-    /// Hardened-runtime games drop DYLD_INSERT_LIBRARIES unless they allow it. Wrapper apps
-    /// (a small launcher that starts an inner .app) are checked with all their inner apps.
+    /// Hardened-runtime games drop DYLD_INSERT_LIBRARIES unless they allow it, and their
+    /// library validation refuses the hook (another signer) unless they turn it off. Wrapper
+    /// apps (a small launcher that starts an inner .app) are checked with all their inner apps.
     static func check(_ app: URL) -> Check {
         guard let bundle = Bundle(url: app), let exe = bundle.executableURL else { return .notAnApp }
         if checkExecutable(exe) == .hardened { return .hardened }
@@ -83,8 +85,12 @@ enum GameLauncher {
         let flags = (dict[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
         let runtime: UInt32 = 0x10000
         guard flags & runtime != 0 else { return .ok }
+        // The hardened runtime needs two exceptions: one lets dyld read DYLD_INSERT_LIBRARIES,
+        // the other lets a library from another team (the hook) load.
         let ents = dict[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
-        return ents["com.apple.security.cs.allow-dyld-environment-variables"] as? Bool == true ? .ok : .hardened
+        let takesDyldVariables = ents["com.apple.security.cs.allow-dyld-environment-variables"] as? Bool == true
+        let takesOtherLibraries = ents["com.apple.security.cs.disable-library-validation"] as? Bool == true
+        return takesDyldVariables && takesOtherLibraries ? .ok : .hardened
     }
 
     static func launch(_ app: URL) throws {
