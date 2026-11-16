@@ -160,6 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             note("No favorite display mode \(slot). Add one in Display Mode › Add Current Mode to Favorites.")
             return
         }
+        // Pressing the favorite that is already on toggles back to the usual mode.
+        if favs[slot - 1] == DisplayModes.current?.key, DisplayModes.savedMode != nil {
+            restoreDisplayMode()
+            return
+        }
         note(DisplayModes.switchTo(favs[slot - 1]))
     }
 
@@ -173,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func note(_ message: String) {
         lastMessage = message
-        NSLog("NotchFill: %@", message)
+        Log.app.notice("\(message, privacy: .public)")
         Toast.show(message)
     }
 

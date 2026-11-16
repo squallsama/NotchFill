@@ -1,4 +1,5 @@
 import Carbon
+import os
 
 /// Global hot key through Carbon. Needs no permission.
 final class HotKey {
@@ -18,7 +19,10 @@ final class HotKey {
         let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
         let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID,
                                          GetApplicationEventTarget(), 0, &ref)
-        guard status == noErr else { return nil }
+        guard status == noErr else {
+            Log.app.error("Hot key \(id, privacy: .public) not registered: OSStatus \(status, privacy: .public)")
+            return nil
+        }
         Self.handlers[id] = handler
     }
 
@@ -36,6 +40,7 @@ final class HotKey {
             let status = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                                            nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
             guard status == noErr, hotKeyID.signature == HotKey.signature else { return OSStatus(eventNotHandledErr) }
+            Log.app.info("Hot key \(hotKeyID.id, privacy: .public) pressed")
             DispatchQueue.main.async { HotKey.handlers[hotKeyID.id]?() }
             return noErr
         }, 1, &spec, nil, nil)
