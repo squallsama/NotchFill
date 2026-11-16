@@ -16,6 +16,7 @@ Inspired by ProMax Display; no code is shared with it.
 | **SDL games use the notch area** | Sets `SDL_VIDEO_MAC_FULLSCREEN_SPACES=0` with `launchctl setenv`, so SDL2/SDL3 games use a borderless window over the whole display (1728×1117 instead of 1728×1084 on a 16" MacBook Pro). Restart Steam and the game after you change it. Apps that you start from Terminal do not get it; use `SDL_VIDEO_MAC_FULLSCREEN_SPACES=0 ./game` there. | – |
 | **Rear-view mirror** | Move the pointer behind the notch: a panel below the notch shows what is there, pointer included. Clicks go to the app behind. Toggle: ⌃⌥⌘M. | Screen Recording |
 | **Hide menu bar and Dock** | Turns on auto-hide for both, and puts back your own settings when you turn it off or quit (also after a crash, on the next launch). | – |
+| **Open at Login** | Menu › **Open at Login**. The SDL setting is gone after a restart until NotchFill runs again, and the mirror needs NotchFill running, so this keeps both working after a restart. | – |
 
 Limits: games with the hardened runtime block the library, also when only the inner app of a
 wrapper is hardened (NotchFill tells you). For such a game you can patch its

@@ -109,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc func toggleLoginItem() {
+        note(LoginItem.set(!LoginItem.isOn))
+    }
+
     @objc func quit() { NSApp.terminate(nil) }
 
     // MARK: Helpers
@@ -213,6 +217,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             info(menu, lastMessage).toolTip = lastMessage
         }
         menu.addItem(.separator())
+        let login = item(menu, "Open at Login", #selector(toggleLoginItem))
+        login.state = LoginItem.isOn ? .on : (LoginItem.needsApproval ? .mixed : .off)
+        if LoginItem.needsApproval {
+            login.toolTip = "Waiting for you to allow it in System Settings › General › Login Items."
+        }
         item(menu, "Quit NotchFill", #selector(quit), key: "q", mods: [.command])
     }
 

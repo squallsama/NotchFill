@@ -14,6 +14,7 @@ Menu bar app (`LSUIElement`), Swift, SwiftPM, macOS 14+. No Xcode project:
 | `NotchMirror.swift` | ScreenCaptureKit stream of the notch rect (+16 pt each side, pointer on), shown 2× in a click-through panel below the notch while the pointer is in the notch. Panel level: shielding level + 1. |
 | `HotKey.swift` | Carbon global hot keys (no permission). |
 | `Toast.swift` | Short on-screen messages. |
+| `LoginItem.swift` | Open at Login through `SMAppService.mainApp` (no helper app). |
 | `GameLauncher.swift` | Launch a game through `notchfill-run`; Steam launch option text; hardened-runtime / platform check. |
 | `DisplaySnapshot.swift` | Diagnostics: ScreenCaptureKit screenshot of the display. |
 
