@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         chrome.restoreIfNeeded()
+        DisplayModes.restoreIfNeeded()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "macbook", accessibilityDescription: "NotchFill")
@@ -37,6 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let hk = HotKey(id: 1, keyCode: kVK_ANSI_M, modifiers: mods, handler: { [weak self] in self?.toggleMirror() }) {
             hotKeys.append(hk)
         }
+        // ⌃⌥⌘0: the user's own display mode; ⌃⌥⌘1…4: favorite display modes.
+        let digits = [kVK_ANSI_0, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4]
+        for (slot, keyCode) in digits.enumerated() {
+            if let hk = HotKey(id: UInt32(10 + slot), keyCode: keyCode, modifiers: mods, handler: { [weak self] in
+                self?.displayHotKey(slot)
+            }) {
+                hotKeys.append(hk)
+            }
+        }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -52,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         mirror.stop()
         chrome.restore()
+        DisplayModes.restore()
     }
 
     // MARK: Actions
@@ -108,6 +119,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    @objc func setDisplayMode(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        note(DisplayModes.switchTo(key))
+    }
+
+    @objc func restoreDisplayMode() {
+        note(DisplayModes.restore() ?? "The display already uses your usual mode.")
+    }
+
+    @objc func addFavoriteDisplayMode() {
+        guard let cur = DisplayModes.current else { return }
+        var favs = DisplayModes.favorites
+        guard !favs.contains(cur.key) else { return }
+        guard favs.count < DisplayModes.maxFavorites else {
+            note("You have \(DisplayModes.maxFavorites) favorites. Remove one first.")
+            return
+        }
+        favs.append(cur.key)
+        DisplayModes.favorites = favs
+        note("Favorite \(favs.count): \(cur.title). Hot key ⌃⌥⌘\(favs.count).")
+    }
+
+    @objc func removeFavoriteDisplayMode(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        DisplayModes.favorites.removeAll { $0 == key }
+        note("Removed \(DisplayModes.title(of: key)) from favorites.")
+    }
+
+    /// Slot 0: the user's own mode; 1…4: favorites.
+    private func displayHotKey(_ slot: Int) {
+        if slot == 0 {
+            restoreDisplayMode()
+            return
+        }
+        let favs = DisplayModes.favorites
+        guard slot <= favs.count else {
+            note("No favorite display mode \(slot). Add one in Display Mode › Add Current Mode to Favorites.")
+            return
+        }
+        note(DisplayModes.switchTo(favs[slot - 1]))
     }
 
     @objc func toggleLoginItem() {
@@ -179,6 +232,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
+        if let displayItem = displayModeMenuItem() { menu.addItem(displayItem) }
+        menu.addItem(.separator())
+
         item(menu, "Launch Game with Notch Fill…", #selector(launchGame))
         item(menu, "Copy Steam Launch Option", #selector(copySteamOption)).toolTip = GameLauncher.steamLaunchOption
         let resItem = NSMenuItem(title: "Game Resolution", action: nil, keyEquivalent: "")
@@ -224,6 +280,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             login.toolTip = "Waiting for you to allow it in System Settings › General › Login Items."
         }
         item(menu, "Quit NotchFill", #selector(quit), key: "q", mods: [.command])
+    }
+
+    /// Display Mode submenu: sizes with the notch strip, refresh rates, favorites (⌃⌥⌘1…4),
+    /// the user's own mode (⌃⌥⌘0), and the other sizes under More.
+    private func displayModeMenuItem() -> NSMenuItem? {
+        let entries = DisplayModes.all()
+        guard let cur = DisplayModes.current, !entries.isEmpty else { return nil }
+        let top = NSMenuItem(title: "Display Mode: \(cur.title)", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        top.submenu = sub
+        let hotMods: NSEvent.ModifierFlags = [.control, .option, .command]
+
+        func modeItem(_ title: String, _ key: String, on: Bool, in menu: NSMenu) -> NSMenuItem {
+            let i = NSMenuItem(title: title, action: #selector(setDisplayMode(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = key
+            i.state = on ? .on : .off
+            menu.addItem(i)
+            return i
+        }
+
+        // Favorites
+        sub.addItem(.sectionHeader(title: "Favorites"))
+        let favs = DisplayModes.favorites
+        for (n, key) in favs.enumerated() {
+            let i = modeItem(DisplayModes.title(of: key), key, on: key == cur.key, in: sub)
+            i.keyEquivalent = "\(n + 1)"
+            i.keyEquivalentModifierMask = hotMods
+        }
+        if favs.contains(cur.key) {
+            let remove = item(sub, "Remove Current Mode from Favorites", #selector(removeFavoriteDisplayMode(_:)))
+            remove.representedObject = cur.key
+        } else {
+            let add = item(sub, "Add Current Mode to Favorites", #selector(addFavoriteDisplayMode))
+            add.isEnabled = favs.count < DisplayModes.maxFavorites
+        }
+        let usual = item(sub, DisplayModes.savedMode.map { "Usual Mode: \(DisplayModes.title(of: $0))" } ?? "Usual Mode",
+                         #selector(restoreDisplayMode), key: "0", mods: hotMods)
+        usual.isEnabled = DisplayModes.savedMode != nil
+
+        // Sizes that reach the top edge, Retina first.
+        sub.addItem(.separator())
+        sub.addItem(.sectionHeader(title: "With Notch Strip"))
+        let sizes = DisplayModes.sizes(entries)
+        for e in sizes where e.withStrip && e.mode.isHiDPI {
+            if let best = DisplayModes.best(sizeKey: e.mode.sizeKey, in: entries) {
+                _ = modeItem(e.mode.sizeTitle, best.mode.key, on: e.mode.sizeKey == cur.sizeKey, in: sub)
+            }
+        }
+
+        // Refresh rates of the current size.
+        sub.addItem(.separator())
+        sub.addItem(.sectionHeader(title: "Refresh Rate"))
+        for e in entries where e.mode.sizeKey == cur.sizeKey {
+            _ = modeItem(e.mode.rateTitle, e.mode.key, on: e.mode.refreshRate == cur.refreshRate, in: sub)
+        }
+
+        // Everything else.
+        sub.addItem(.separator())
+        let more = NSMenuItem(title: "More Sizes", action: nil, keyEquivalent: "")
+        let moreMenu = NSMenu()
+        more.submenu = moreMenu
+        moreMenu.addItem(.sectionHeader(title: "With Notch Strip, 1x (fewer pixels, scaled up)"))
+        for e in sizes where e.withStrip && !e.mode.isHiDPI {
+            if let best = DisplayModes.best(sizeKey: e.mode.sizeKey, in: entries) {
+                _ = modeItem(e.mode.sizeTitle, best.mode.key, on: e.mode.sizeKey == cur.sizeKey, in: moreMenu)
+            }
+        }
+        moreMenu.addItem(.separator())
+        moreMenu.addItem(.sectionHeader(title: "Without Notch Strip (16:10, the notch stays black)"))
+        for e in sizes where !e.withStrip {
+            if let best = DisplayModes.best(sizeKey: e.mode.sizeKey, in: entries) {
+                _ = modeItem(e.mode.sizeTitle, best.mode.key, on: e.mode.sizeKey == cur.sizeKey, in: moreMenu)
+            }
+        }
+        sub.addItem(more)
+        return top
     }
 
     @discardableResult

@@ -16,6 +16,8 @@ Mac gamers with a notched MacBook Pro / Air.
 - Phase 2 (works, no SIP): native full screen games cover the strip through a hook library
   loaded into the game (opt-in per game: menu launcher or Steam launch option).
   Project rule: no SIP changes, so no Dock add-on.
+- Display mode switching (no SIP): sizes with the notch strip, refresh rate, favorites on hot keys;
+  the user's own mode comes back on quit.
 - Later: trackpad gestures for Dock / menu bar / Control Center.
 
 ## Rules

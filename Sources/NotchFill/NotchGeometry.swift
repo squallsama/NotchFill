@@ -26,20 +26,22 @@ struct NotchScreen {
 enum NotchGeometry {
     /// Last notch seen per display. While an app in safe-area compatibility mode is in
     /// full screen, macOS reports `safeAreaInsets.top == 0` for the whole display.
-    private static var lastKnown: [CGDirectDisplayID: CGRect] = [:]
+    /// Kept with the screen frame it was measured on: after a display mode change (or in a
+    /// mode without the strip, e.g. 1728×1080) the old rect is wrong, so it is not used.
+    private static var lastKnown: [CGDirectDisplayID: (notch: CGRect, frame: CGRect)] = [:]
 
     /// The first screen with a notch (on a MacBook that is the built-in display).
     static func notchedScreen() -> NotchScreen? {
         for screen in NSScreen.screens {
             if let info = describe(screen) {
-                lastKnown[info.displayID] = info.notchRect
+                lastKnown[info.displayID] = (info.notchRect, info.fullFrame)
                 return info
             }
         }
         for screen in NSScreen.screens {
             let probe = NotchScreen(screen: screen, fullFrame: screen.frame, notchRect: .zero)
-            if let notch = lastKnown[probe.displayID], screen.frame.contains(notch.origin) {
-                return NotchScreen(screen: screen, fullFrame: screen.frame, notchRect: notch)
+            if let known = lastKnown[probe.displayID], known.frame == screen.frame {
+                return NotchScreen(screen: screen, fullFrame: screen.frame, notchRect: known.notch)
             }
         }
         return nil
