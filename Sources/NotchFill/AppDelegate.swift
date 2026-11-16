@@ -207,6 +207,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let (key, _) = profileArgs(sender) else { return }
         GameProfiles.update(key) { $0.fullScreen.toggle() }
         if let p = GameProfiles.get(key), p.fullScreen {
+            // Ask right away: macOS adds NotchFill to the Accessibility list, the user only turns it on.
+            if !p.isUnity && !FullScreenStarter.isTrusted {
+                openAccessibilitySettings()
+                note("Turn on NotchFill in System Settings › Privacy & Security › Accessibility, so \(p.name) can start in full screen.")
+                return
+            }
             note(p.isUnity ? "\(p.name) starts in full screen when started through NotchFill or the Steam option."
                            : "\(p.name) starts in full screen. Apps started without NotchFill need Accessibility.")
         }
@@ -341,6 +347,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let sr = NotchMirror.hasPermission
         item(menu, "Screen Recording: \(sr ? "Allowed" : "Not allowed – Open Settings…")", #selector(openScreenRecordingSettings))
+            .toolTip = "Needed for the rear-view mirror."
+        let ax = FullScreenStarter.isTrusted
+        item(menu, "Accessibility: \(ax ? "Allowed" : "Not allowed – Open Settings…")", #selector(openAccessibilitySettings))
+            .toolTip = "Needed for Full Screen at Start of apps started without NotchFill (Steam, Finder, Dock)."
 
         if let lastMessage {
             menu.addItem(.separator())
@@ -453,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if profiles.contains(where: { $0.fullScreen && !$0.isUnity }) && !FullScreenStarter.isTrusted {
             sub.addItem(.separator())
             item(sub, "Accessibility: Not allowed – Open Settings…", #selector(openAccessibilitySettings))
-                .toolTip = "Full Screen at Start for apps started without NotchFill (Steam, Finder, Dock)."
+                .toolTip = "Needed for Full Screen at Start of apps started without NotchFill (Steam, Finder, Dock)."
         }
         sub.addItem(.separator())
         let hint = NSMenuItem(title: "A profile applies when its app starts", action: nil, keyEquivalent: "")
