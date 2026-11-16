@@ -1,8 +1,8 @@
-NotchFill @VERSION — full screen games use the strip beside the notch on MacBooks with a notch. No SIP changes.
+NotchFill @VERSION@ — full screen games use the strip beside the notch on MacBooks with a notch. No SIP changes.
 
 ## Install
 
-1. Download `NotchFill-@VERSION.zip` and unzip it.
+1. Download `NotchFill-@VERSION@.zip` and unzip it.
 2. Move `NotchFill.app` to `/Applications` (the Steam launch option points to the app's location).
 3. The app is **not signed with an Apple Developer ID and not notarized**, so macOS blocks the first launch. Do one of these:
    - Open it once, then go to **System Settings › Privacy & Security** and click **Open Anyway**.
@@ -20,4 +20,4 @@ Requirements: MacBook with a notch (Apple silicon), macOS 14 or later.
 
 NotchFill loads a small library into the game you start with it. Do not use it with online games that have anti-cheat. Games with the hardened runtime cannot load it (NotchFill tells you).
 
-SHA-256 of the zip: see `NotchFill-@VERSION.zip.sha256`.
+SHA-256 of the zip: see `NotchFill-@VERSION@.zip.sha256`.
