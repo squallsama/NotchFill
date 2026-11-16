@@ -97,12 +97,35 @@ Hypothesis: the Dock builds the full screen Space from `screenBoundsExcludingMen
 Spaces would give the full 1117 pt. AppKit talks to the Dock through
 `_NSFullScreenDockConnection*` (create / enter / update space).
 
-Open questions:
+Open questions (most are answered by the study below):
 - Injecting into the arm64e Dock: yabai needs `-arm64e_preview_abi` in boot-args for its
   loader; ProMax does not ask for it, so it may use another technique (for example data
   patches through `task_for_pid`, allowed with `--without debug`).
 - `WindowManager.app` has `notchRect` and `initWithFrame:safeArea:style:`; it may also take
   part in tiling / full screen on macOS 26+.
+
+#### What ProMax does: a static study of ProMax Display 0.1.16
+
+From [promax-display-re](https://github.com/Kam471/promax-display-re), a static study of the
+shipped app. Its add-ons and root helper are not stripped, so the names below are the
+binaries' own. NotchFill did not run or measure any of this. "Inferred" means read from the
+code, not tested.
+
+| Question | What the study found |
+|------|--------|
+| How code gets into the Dock | A root LaunchDaemon (`ProMaxDisplayHelper`) finds Dock, WindowManager and MenuBarAgent by exact executable path and loads one dylib into each with the yabai-style loader: `task_for_pid`, a small arm64 stub written into the process, `thread_create_running`, then `pthread_create_from_mach_thread` + `dlopen`. So it loads dylibs; it does not patch data from outside. `task_for_pid` on those processes is why it needs `--without debug`; one install folder (`/Library/Apple/usr/lib/ProMax Display/`) is SIP-protected, which is why it needs `--without fs` (both inferred). |
+| `-arm64e_preview_abi` | Not answered. The add-ons are arm64e builds signed with the vendor's team ID. |
+| Test 11: safe-aperture calls from a normal app do nothing | Fits. ProMax makes the same call, `SLSTransactionSetSafeApertureOverride`, from inside the Dock. It also replaces `+[WAWindow setSafeApertureOverride:force:]` in the Dock: while its "hold" is on, every override the Dock asks for is kept at 0 (its log: `dock asked for override %.2f (force %d) while holding: kept at 0`). Split View follows the same hold. So the full screen Space is not shrunk below the notch (inferred). |
+| The `screenBoundsExcludingMenuBar` hypothesis | The study does not show this path. The hold above is the mechanism it found. |
+| Test 5: `visibleFrame` never includes the strip | The WindowManager add-on finds each display's record in WindowManager's memory and opens its usable frame up to the top edge (its log: `display %u: usable frame opened to the top (band %.0f pt)`), and puts it back when the feature is off. While on, it also turns off "drag to the top for Mission Control". |
+| Test 15: the black `Menubar` window over the strip | It does not put windows above the menu bar. The Dock add-on limits how far the menu bar can reveal (`SLSTransactionSetMenuBarOverrideMaximumReveal`). A MenuBarAgent add-on stands in as the menu bar manager's delegate to set the bar's look. |
+| Mirror behind the notch | Not ScreenCaptureKit. Inside the Dock it makes a `CAContext` with a `CAPluginLayer` that shows the windows behind the notch by window ID, so it needs no Screen Recording permission. |
+| Cost of the Dock way | The Dock add-on compares the Dock's `LC_UUID` with a list of known builds (macOS 26.6.2, 27.2, 27.3). On an unknown build, the features that use fixed offsets stay off until ProMax updates. |
+| Apps, without the add-ons | For SDL games it gives the same `SDL_VIDEO_MAC_FULLSCREEN_SPACES=0 %command%` launch option as NotchFill. For some editors and terminals it changes their own settings: `window.nativeFullScreen` (VS Code, Cursor), `macos-non-native-fullscreen` (Ghostty), `macos_traditional_fullscreen` and `macos_fullscreen_ignore_safe_area_insets` (kitty), `MMNativeFullScreen` (mpv). These need no SIP change. |
+
+For NotchFill: the hold is the piece that gives every app the strip, and it needs code in the
+Dock, so it stays out of this project. The per-app settings in the last row are possible
+without SIP.
 
 ### B. Inject into the game (no SIP change)
 
